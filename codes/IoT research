@@ -1,0 +1,353 @@
+import os
+os.environ["PYTHONWARNINGS"] = "ignore"
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+
+# Point this to your MERGED_CSV folder 
+folder_path = r'C:\Users\ERC\Downloads\MERGED_CSV'
+
+print("Hunting for balanced data... this might take a minute.")
+
+benign_data = pd.DataFrame()
+malicious_data = pd.DataFrame()
+
+
+# Loop through the files to collect enough of both classes
+for file_name in os.listdir(folder_path):
+    if file_name.endswith('.csv'):
+        # Add this print statement to see the progress
+        print(f"Scanning {file_name}... (Current Benign: {len(benign_data)} / 50000)")
+        
+        df_temp = pd.read_csv(os.path.join(folder_path, file_name))
+        
+        # Separate benign and malicious traffic
+        b_temp = df_temp[df_temp['Label'] == 'BENIGN']
+        m_temp = df_temp[df_temp['Label'] != 'BENIGN']
+        
+        # Add to our running totals
+        benign_data = pd.concat([benign_data, b_temp])
+        malicious_data = pd.concat([malicious_data, m_temp])
+        
+        # Stop loading once we have at least 50,000 of each
+        if len(benign_data) >= 50000 and len(malicious_data) >= 50000:
+            print("Found enough data! Building the final subset...")
+            break
+
+
+
+# Take exactly 50,000 of each for a perfectly balanced 100k dataset
+df_subset = pd.concat([
+    benign_data.sample(n=50000, random_state=42),
+    malicious_data.sample(n=50000, random_state=42)
+])
+
+# Shuffle the combined dataset so it is randomized
+df_subset = df_subset.sample(frac=1, random_state=42).reset_index(drop=True)
+print(f"Balanced Subset shape: {df_subset.shape}")
+
+# Create the binary target column: 0 for Benign, 1 for Attack
+df_subset['binary_label'] = df_subset['Label'].apply(lambda x: 0 if x == 'BENIGN' else 1)
+
+print("\nClass Balance:")
+print(df_subset['binary_label'].value_counts())
+
+# Clean missing and infinite values
+df_subset.replace([np.inf, -np.inf], np.nan, inplace=True)
+df_subset.dropna(inplace=True)
+
+# Separate features and targets
+X = df_subset.drop(columns=['Label', 'binary_label'])
+y = df_subset['binary_label']
+
+# Scale the features
+scaler = MinMaxScaler()
+X_scaled = scaler.fit_transform(X)
+X_scaled_df = pd.DataFrame(X_scaled, columns=X.columns)
+
+# Split 80/20
+X_train, X_test, y_train, y_test = train_test_split(X_scaled_df, y, test_size=0.2, random_state=42)
+
+print(f"Training data shape: {X_train.shape}")
+print(f"Testing data shape: {X_test.shape}")
+
+
+
+import time
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, f1_score
+
+# ==========================================
+# Phase 2: Building Baseline Classifiers
+# ==========================================
+
+print("\n--- Training Decision Tree Baseline ---")
+# Initialize the Decision Tree
+dt_model = DecisionTreeClassifier(random_state=42)
+
+# Train the model
+dt_model.fit(X_train, y_train)
+
+# Measure inference time for the test set
+start_time = time.time()
+dt_predictions = dt_model.predict(X_test)
+dt_inference_time = time.time() - start_time
+
+# Calculate clean metrics
+dt_acc = accuracy_score(y_test, dt_predictions)
+dt_f1 = f1_score(y_test, dt_predictions)
+
+print(f"Decision Tree Accuracy:  {dt_acc:.4f}")
+print(f"Decision Tree F1-Score:  {dt_f1:.4f}")
+print(f"Inference Time (20k samples): {dt_inference_time:.4f} seconds")
+
+
+print("\n--- Training Random Forest Baseline ---")
+# Initialize the Random Forest (n_jobs=-1 uses all available CPU cores)
+rf_model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+
+# Train the model
+rf_model.fit(X_train.values, y_train)
+
+# Measure inference time for the test set
+start_time = time.time()
+rf_predictions = rf_model.predict(X_test)
+rf_inference_time = time.time() - start_time
+
+# Calculate clean metrics
+rf_acc = accuracy_score(y_test, rf_predictions)
+rf_f1 = f1_score(y_test, rf_predictions)
+
+print(f"Random Forest Accuracy:  {rf_acc:.4f}")
+print(f"Random Forest F1-Score:  {rf_f1:.4f}")
+print(f"Inference Time (20k samples): {rf_inference_time:.4f} seconds")
+
+
+
+
+import xgboost as xgb
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import time
+
+print("\n--- Training XGBoost Baseline ---")
+# Initialize XGBoost classifier
+xgb_model = xgb.XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+
+# Train the model
+xgb_model.fit(X_train, y_train)
+
+# Measure inference time for the test set
+start_time = time.time()
+xgb_predictions = xgb_model.predict(X_test)
+xgb_inference_time = time.time() - start_time
+
+print(f"XGBoost Accuracy:  {accuracy_score(y_test, xgb_predictions):.4f}")
+print(f"XGBoost F1-Score:  {f1_score(y_test, xgb_predictions):.4f}")
+print(f"Inference Time (20k samples): {xgb_inference_time:.4f} seconds")
+
+
+print("\n--- Training PyTorch MLP Baseline ---")
+# Set device for hardware acceleration
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Convert pandas DataFrames/Series to PyTorch tensors
+X_train_tensor = torch.tensor(X_train.values, dtype=torch.float32).to(device)
+y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32).unsqueeze(1).to(device)
+X_test_tensor = torch.tensor(X_test.values, dtype=torch.float32).to(device)
+y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32).unsqueeze(1).to(device)
+
+# Define a lightweight 3-layer MLP
+class LightweightMLP(nn.Module):
+    def __init__(self, input_dim):
+        super(LightweightMLP, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
+        x = self.sigmoid(self.fc3(x))
+        return x
+
+# Initialize model, loss function, and optimizer
+mlp_model = LightweightMLP(X_train.shape[1]).to(device)
+criterion = nn.BCELoss()
+optimizer = optim.Adam(mlp_model.parameters(), lr=0.001)
+
+# Train the MLP
+mlp_model.train()
+for epoch in range(50):
+    optimizer.zero_grad()
+    outputs = mlp_model(X_train_tensor)
+    loss = criterion(outputs, y_train_tensor)
+    loss.backward()
+    optimizer.step()
+
+# Evaluate the MLP
+mlp_model.eval()
+start_time = time.time()
+with torch.no_grad():
+    mlp_preds = mlp_model(X_test_tensor)
+    mlp_preds_class = (mlp_preds >= 0.5).float().cpu().numpy()
+mlp_inference_time = time.time() - start_time
+
+print(f"MLP Accuracy:  {accuracy_score(y_test, mlp_preds_class):.4f}")
+print(f"MLP F1-Score:  {f1_score(y_test, mlp_preds_class):.4f}")
+print(f"Inference Time (20k samples): {mlp_inference_time:.4f} seconds")
+
+
+
+from art.estimators.classification import PyTorchClassifier
+from art.attacks.evasion import FastGradientMethod
+import numpy as np
+
+print("\n==========================================")
+print("Phase 3: White-Box Attack (FGSM on MLP)")
+print("==========================================")
+
+# Wrap the PyTorch model in ART's classifier API
+art_classifier = PyTorchClassifier(
+    model=mlp_model,
+    clip_values=(0.0, 1.0), # Tabular constraints: keeps features constrained within our scaler limits
+    loss=criterion,
+    optimizer=optimizer,
+    input_shape=(X_train.shape[1],),
+    nb_classes=2,
+    channels_first=False
+)
+
+# Initialize the Fast Gradient Sign Method (FGSM) attack
+# 'eps' is the perturbation budget (the maximum amount the attacker can shift the features)
+eps_value = 0.1
+fgsm_attack = FastGradientMethod(estimator=art_classifier, eps=eps_value)
+
+# We will attack a subset of the test data (first 5,000 samples) to ensure rapid generation
+X_test_subset = X_test.values[:5000].astype(np.float32)
+y_test_subset = y_test.values[:5000]
+
+print(f"Generating adversarial network traffic with eps={eps_value}... (this might take a moment)")
+# Generate the adversarial network flows
+X_test_adv = fgsm_attack.generate(x=X_test_subset)
+
+# Make predictions on the clean data vs. the adversarial data
+clean_preds = (art_classifier.predict(X_test_subset) >= 0.5).astype(int).flatten()
+adv_preds = (art_classifier.predict(X_test_adv) >= 0.5).astype(int).flatten()
+
+# Calculate the drop in detection
+clean_acc = accuracy_score(y_test_subset, clean_preds)
+adv_acc = accuracy_score(y_test_subset, adv_preds)
+
+print(f"Clean MLP Accuracy (on 5k subset):   {clean_acc:.4f}")
+print(f"Adversarial MLP Accuracy (eps={eps_value}): {adv_acc:.4f}")
+print(f"Accuracy Drop:                       {(clean_acc - adv_acc) * 100:.2f}%")
+
+
+
+
+from art.estimators.classification.scikitlearn import ScikitlearnRandomForestClassifier
+from art.attacks.evasion import HopSkipJump
+
+print("\n==========================================")
+print("Phase 3: Black-Box Attack (HopSkipJump on Random Forest)")
+print("==========================================")
+
+# Parallel processing but it creates the joblib worker warnings
+rf_model.set_params(n_jobs=1)
+
+# Wrap the Scikit-learn Random Forest in ART's API
+art_rf = ScikitlearnRandomForestClassifier(model=rf_model, clip_values=(0.0, 1.0))
+
+# Initialize the HopSkipJump attack
+hsj_attack = HopSkipJump(classifier=art_rf, targeted=False, max_iter=10, max_eval=1000, init_eval=10)
+
+# Isolate just 100 test samples
+X_test_subset_bb = X_test.values[:100].astype(np.float32)
+y_test_subset_bb = y_test.values[:100]
+
+print("Generating black-box adversarial payloads... (this will take a couple of minutes)")
+X_test_adv_bb = hsj_attack.generate(x=X_test_subset_bb)
+
+# Evaluate the drop in accuracy
+clean_preds_bb = rf_model.predict(X_test_subset_bb)
+adv_preds_bb = rf_model.predict(X_test_adv_bb)
+
+clean_acc_bb = accuracy_score(y_test_subset_bb, clean_preds_bb)
+adv_acc_bb = accuracy_score(y_test_subset_bb, adv_preds_bb)
+
+print(f"Clean RF Accuracy (on 100 subset):     {clean_acc_bb:.4f}")
+print(f"Adversarial RF Accuracy (HopSkipJump): {adv_acc_bb:.4f}")
+print(f"Accuracy Drop:                         {(clean_acc_bb - adv_acc_bb) * 100:.2f}%")
+
+
+
+from art.defences.preprocessor import FeatureSqueezing
+
+print("\n==========================================")
+print("Phase 4: Defenses (Adversarial Training on MLP)")
+print("==========================================")
+
+# 1. Generate adversarial examples on a subset of the TRAINING data (10,000 samples)
+print("Generating adversarial training data... (this takes a moment)")
+X_train_subset = X_train.values[:10000].astype(np.float32)
+y_train_subset = y_train.values[:10000]
+
+X_train_adv_data = fgsm_attack.generate(x=X_train_subset)
+
+# 2. Combine the clean training data and the adversarial training data
+X_train_combined = np.vstack((X_train_subset, X_train_adv_data))
+y_train_combined = np.concatenate((y_train_subset, y_train_subset))
+
+# Convert the combined dataset into PyTorch tensors
+X_train_comb_tensor = torch.tensor(X_train_combined, dtype=torch.float32).to(device)
+y_train_comb_tensor = torch.tensor(y_train_combined, dtype=torch.float32).unsqueeze(1).to(device)
+
+# 3. Initialize a BRAND NEW MLP model to learn from the augmented data
+adv_trained_mlp = LightweightMLP(X_train.shape[1]).to(device)
+criterion_adv = nn.BCELoss()
+optimizer_adv = optim.Adam(adv_trained_mlp.parameters(), lr=0.001)
+
+print("Retraining a robust MLP on the augmented dataset...")
+# Train the new model
+adv_trained_mlp.train()
+start_time_at = time.time()
+for epoch in range(50):
+    optimizer_adv.zero_grad()
+    outputs = adv_trained_mlp(X_train_comb_tensor)
+    loss = criterion_adv(outputs, y_train_comb_tensor)
+    loss.backward()
+    optimizer_adv.step()
+at_training_time = time.time() - start_time_at
+
+# Wrap the newly trained robust model in ART
+art_classifier_adv_trained = PyTorchClassifier(
+    model=adv_trained_mlp,
+    clip_values=(0.0, 1.0),
+    loss=criterion_adv,
+    optimizer=optimizer_adv,
+    input_shape=(X_train.shape[1],),
+    nb_classes=2,
+    channels_first=False
+)
+
+# 4. Evaluate the new robust model against the Phase 3 test data
+print("Evaluating the adversarially trained model...")
+
+# Test how it performs on clean data
+clean_preds_at = (art_classifier_adv_trained.predict(X_test_subset) >= 0.5).astype(int).flatten()
+clean_acc_at = accuracy_score(y_test_subset, clean_preds_at)
+
+# Test how it performs against the exact same FGSM payloads from Phase 3
+adv_preds_at = (art_classifier_adv_trained.predict(X_test_adv) >= 0.5).astype(int).flatten()
+adv_acc_at = accuracy_score(y_test_subset, adv_preds_at)
+
+print(f"AT Model - Clean Accuracy:          {clean_acc_at:.4f}")
+print(f"AT Model - Under FGSM Attack:       {adv_acc_at:.4f}")
+print(f"Resilience Recovered:               {adv_acc_at - adv_acc:.4f}")
+print(f"Adversarial Training Overhead Time: {at_training_time:.4f} seconds")

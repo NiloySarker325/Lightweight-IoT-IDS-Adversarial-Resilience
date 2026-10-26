@@ -1,0 +1,162 @@
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Match the aesthetic style of Figure_1.png
+plt.style.use('seaborn-v0_8-whitegrid')
+COLOR_CLEAN = '#111111'      # Black from Figure 1
+COLOR_ATTACK = '#7f6060'     # Muted maroon/brown from Figure 1
+COLOR_DEFENSE = '#9ecae1'    # Light blue from Figure 1
+COLOR_ACCENT = '#4a7c59'     # Muted sage green for secondary metrics
+
+# ==============================================================================
+# FIGURE 2: Baseline Accuracy, F1-Score, and Batch Inference Latency
+# ==============================================================================
+models = ['Decision Tree', 'Random Forest', 'XGBoost', 'PyTorch MLP']
+accuracies = [98.51, 99.20, 99.08, 98.14]
+f1_scores = [98.50, 99.19, 99.06, 98.10]
+latencies_ms = [10.9, 39.4, 12.4, 2.1]  # Fastest recorded batch latency (ms) for 20k samples
+
+x = np.arange(len(models))
+width = 0.35
+
+fig, ax1 = plt.subplots(figsize=(9, 5))
+
+rects1 = ax1.bar(x - width/2, accuracies, width, label='Clean Accuracy (%)', color=COLOR_CLEAN, edgecolor='black')
+rects2 = ax1.bar(x + width/2, f1_scores, width, label='F1-Score (%)', color=COLOR_DEFENSE, edgecolor='black')
+
+ax1.set_ylabel('Performance Metric (%)', fontweight='bold')
+ax1.set_ylim(94, 101.5)
+ax1.set_xticks(x)
+ax1.set_xticklabels(models, fontweight='bold')
+ax1.set_title('Baseline Classifier Performance vs. Batch Inference Latency (20k Flows)', fontweight='bold')
+
+for rect in rects1:
+    h = rect.get_height()
+    ax1.text(rect.get_x() + rect.get_width()/2., h + 0.15, f'{h:.2f}%', ha='center', va='bottom', fontsize=9, fontweight='bold')
+for rect in rects2:
+    h = rect.get_height()
+    ax1.text(rect.get_x() + rect.get_width()/2., h + 0.15, f'{h:.2f}%', ha='center', va='bottom', fontsize=9)
+
+# Secondary axis for Latency (ms)
+ax2 = ax1.twinx()
+line1 = ax2.plot(x, latencies_ms, color='#d62728', marker='o', linewidth=2.5, markersize=8, label='Inference Latency (ms)')
+ax2.set_ylabel('Batch Latency for 20k Samples (ms)', color='#d62728', fontweight='bold')
+ax2.set_ylim(0, 50)
+ax2.grid(False)
+
+for i, txt in enumerate(latencies_ms):
+    ax2.annotate(f'{txt} ms', (x[i], latencies_ms[i]), textcoords="offset points", xytext=(0, 10),
+                 ha='center', fontweight='bold', color='#d62728')
+
+# Combined legend
+lines_1, labels_1 = ax1.get_legend_handles_labels()
+lines_2, labels_2 = ax2.get_legend_handles_labels()
+ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='lower right', frameon=True)
+
+plt.tight_layout()
+plt.savefig('Figure_2_Baseline_Comparison.png', dpi=300, bbox_inches='tight')
+plt.close()
+
+# ==============================================================================
+# FIGURE 3: Black-Box HopSkipJump Multi-Run Accuracy & Speedup Analysis
+# ==============================================================================
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.8))
+
+runs = ['Clean\nBaseline', 'Single-Core\n(Run 1)', 'Multi-Core\n(Run 2)', 'Multi-Core\n(Run 3)']
+rf_accs = [100.0, 50.0, 42.0, 52.0]
+colors_rf = [COLOR_CLEAN, COLOR_ATTACK, COLOR_ATTACK, COLOR_ATTACK]
+
+bars1 = ax1.bar(runs, rf_accs, color=colors_rf, edgecolor='black', width=0.55)
+ax1.set_title('Random Forest Accuracy Under HopSkipJump', fontweight='bold')
+ax1.set_ylabel('Detection Accuracy (%)', fontweight='bold')
+ax1.set_ylim(0, 115)
+
+for bar in bars1:
+    yval = bar.get_height()
+    ax1.text(bar.get_x() + bar.get_width()/2, yval + 2, f'{yval:.1f}%', ha='center', va='bottom', fontweight='bold')
+
+exec_modes = ['Single-Core\n(n_jobs=1)', 'Multi-Core Stripped\n(n_jobs=-1, .values)']
+exec_times = [244.0, 100.0]
+bars2 = ax2.bar(exec_modes, exec_times, color=[COLOR_ATTACK, COLOR_DEFENSE], edgecolor='black', width=0.5)
+ax2.set_title('HopSkipJump Generation Time (100 Samples)', fontweight='bold')
+ax2.set_ylabel('Execution Time (Seconds)', fontweight='bold')
+ax2.set_ylim(0, 280)
+
+for bar in bars2:
+    yval = bar.get_height()
+    ax2.text(bar.get_x() + bar.get_width()/2, yval + 5, f'{yval:.0f} s\n({yval/100:.2f} s/it)', ha='center', va='bottom', fontweight='bold')
+
+plt.tight_layout()
+plt.savefig('Figure_3_HopSkipJump_MultiRun.png', dpi=300, bbox_inches='tight')
+plt.close()
+
+# ==============================================================================
+# FIGURE 4: Reactive Feature Squeezing vs. Proactive Adversarial Training
+# ==============================================================================
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.8))
+
+# Panel 1: Feature Squeezing Trial
+fs_stages = ['Clean\nBaseline', 'Under FGSM\nAttack', 'After Feature\nSqueezing (4-bit)']
+fs_vals = [96.72, 93.86, 86.48]
+bars_fs = ax1.bar(fs_stages, fs_vals, color=[COLOR_CLEAN, COLOR_ATTACK, '#d95f02'], edgecolor='black', width=0.55)
+ax1.set_title('Reactive Defense: Feature Squeezing (-7.38% Loss)', fontweight='bold')
+ax1.set_ylabel('MLP Accuracy (%)', fontweight='bold')
+ax1.set_ylim(0, 115)
+
+for bar in bars_fs:
+    yval = bar.get_height()
+    ax1.text(bar.get_x() + bar.get_width()/2, yval + 2, f'{yval:.2f}%', ha='center', va='bottom', fontweight='bold')
+
+# Panel 2: Adversarial Training Trial
+at_stages = ['Clean\nBaseline', 'Under FGSM\nAttack', 'After Adversarial\nTraining (50 Ep.)']
+at_vals = [97.02, 86.60, 98.18]
+bars_at = ax2.bar(at_stages, at_vals, color=[COLOR_CLEAN, COLOR_ATTACK, COLOR_DEFENSE], edgecolor='black', width=0.55)
+ax2.set_title('Proactive Defense: Adversarial Training (+11.58% Gain)', fontweight='bold')
+ax2.set_ylim(0, 115)
+
+for bar in bars_at:
+    yval = bar.get_height()
+    ax2.text(bar.get_x() + bar.get_width()/2, yval + 2, f'{yval:.2f}%', ha='center', va='bottom', fontweight='bold')
+
+plt.tight_layout()
+plt.savefig('Figure_4_Defense_Tradeoffs.png', dpi=300, bbox_inches='tight')
+plt.close()
+
+# ==============================================================================
+# FIGURE 5: Log-Scale Computational Overhead Across All Pipeline Operations
+# ==============================================================================
+fig, ax = plt.subplots(figsize=(9, 4.8))
+
+operations = [
+    'MLP Inference\n(20k Flows)',
+    'Feature Squeezing\n(5k Flows)',
+    'DT Inference\n(20k Flows)',
+    'XGBoost Inference\n(20k Flows)',
+    'RF Inference\n(20k Flows)',
+    'Adversarial Training\n(50 Epochs, 20k Flows)',
+    'HopSkipJump Attack\n(Multi-Core, 100 Flows)',
+    'HopSkipJump Attack\n(Single-Core, 100 Flows)'
+]
+times_sec = [0.0021, 0.0059, 0.0109, 0.0124, 0.0394, 0.6969, 100.0, 244.0]
+bar_colors = [COLOR_CLEAN, '#d95f02', COLOR_CLEAN, COLOR_CLEAN, COLOR_CLEAN, COLOR_DEFENSE, COLOR_ATTACK, COLOR_ATTACK]
+
+y_pos = np.arange(len(operations))
+bars = ax.barh(y_pos, times_sec, color=bar_colors, edgecolor='black')
+ax.set_yticks(y_pos)
+ax.set_yticklabels(operations, fontweight='bold')
+ax.invert_yaxis()  # Top-down fastest to slowest
+ax.set_xscale('log')
+ax.set_xlim(0.001, 1000)
+ax.set_xlabel('Execution Time in Seconds (Logarithmic Scale)', fontweight='bold')
+ax.set_title('Computational Overhead Across Inference, Defense, and Attack Phases', fontweight='bold')
+
+for bar in bars:
+    w = bar.get_width()
+    ax.text(w * 1.25, bar.get_y() + bar.get_height()/2, f'{w:.4f} s' if w < 1 else f'{w:.1f} s',
+            va='center', ha='left', fontweight='bold', fontsize=9)
+
+plt.tight_layout()
+plt.savefig('Figure_5_Latency_Overhead_LogScale.png', dpi=300, bbox_inches='tight')
+plt.close()
+
+print("Successfully generated Figures 2, 3, 4, and 5 at 300 DPI!")

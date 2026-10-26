@@ -1,0 +1,9 @@
+import pandas as pd
+
+# Load just one file to check the label strings
+file_path = r'C:\Users\ERC\Downloads\MERGED_CSV\Merged50.csv'
+df = pd.read_csv(file_path)
+
+print("Unique labels in this file:")
+# Print every unique value in the 'Label' column
+print(df['Label'].unique())
