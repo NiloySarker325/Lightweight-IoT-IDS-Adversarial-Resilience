@@ -5,7 +5,13 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 
-# Point this to your MERGED_CSV folder 
+
+
+print("\n==========================================")
+print("Phase 1: Initial setup")
+print("==========================================")
+
+# Pointing this to my MERGED_CSV folder 
 folder_path = r'C:\Users\ERC\Downloads\MERGED_CSV'
 
 print("Hunting for balanced data... this might take a minute.")
@@ -17,7 +23,7 @@ malicious_data = pd.DataFrame()
 # Loop through the files to collect enough of both classes
 for file_name in os.listdir(folder_path):
     if file_name.endswith('.csv'):
-        # Add this print statement to see the progress
+        # Adding this print statement to see the progress
         print(f"Scanning {file_name}... (Current Benign: {len(benign_data)} / 50000)")
         
         df_temp = pd.read_csv(os.path.join(folder_path, file_name))
@@ -26,11 +32,11 @@ for file_name in os.listdir(folder_path):
         b_temp = df_temp[df_temp['Label'] == 'BENIGN']
         m_temp = df_temp[df_temp['Label'] != 'BENIGN']
         
-        # Add to our running totals
+        # Add to the running totals
         benign_data = pd.concat([benign_data, b_temp])
         malicious_data = pd.concat([malicious_data, m_temp])
         
-        # Stop loading once we have at least 50,000 of each
+        # Stop loading once it has at least 50,000 of each
         if len(benign_data) >= 50000 and len(malicious_data) >= 50000:
             print("Found enough data! Building the final subset...")
             break
@@ -228,7 +234,7 @@ art_classifier = PyTorchClassifier(
 eps_value = 0.1
 fgsm_attack = FastGradientMethod(estimator=art_classifier, eps=eps_value)
 
-# We will attack a subset of the test data (first 5,000 samples) to ensure rapid generation
+# I will attack a subset of the test data (first 5,000 samples) to ensure rapid generation
 X_test_subset = X_test.values[:5000].astype(np.float32)
 y_test_subset = y_test.values[:5000]
 
